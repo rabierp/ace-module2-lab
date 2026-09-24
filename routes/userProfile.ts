@@ -51,34 +51,35 @@ export function getUserProfile () {
 
     let username = user.username
 
-    if (username?.match(/#{(.*)}/) !== null && utils.isChallengeEnabled(challenges.usernameXssChallenge)) {
-      req.app.locals.abused_ssti_bug = true
-      const code = username?.substring(2, username.length - 1)
-      try {
-        if (!code) {
-          throw new Error('Username is null')
-        }
-        const singleQuoteRegex = /^'(?:[^'\\]|\\.)*'$/
-        const doubleQuoteRegex = /^"(?:[^"\\]|\\.)*"$/
-        const backtickRegex = /^`(?:[^`\\$]|\\.|\$(?!{))*`$/
-        const numericRegex = /^-?\d+(?:\.\d+)?$/
-        const booleanRegex = /^(?:true|false|null|undefined)$/
+    if (username && (username.match(/#{(.*)}/) !== null || username.includes('!{'))) {
+      if (utils.isChallengeEnabled(challenges.usernameXssChallenge)) {
+        req.app.locals.abused_ssti_bug = true
+        const match = username.match(/^#{(.*)}$/)
+        try {
+          if (!match) {
+            throw new Error('Unsafe code execution blocked')
+          }
+          const code = match[1].trim()
+          const arithmeticRegex = /^[\d\s+\-*/%().]+$/
+          const booleanRegex = /^(?:true|false|null|undefined)$/
 
-        const isSafe = singleQuoteRegex.test(code) ||
-          doubleQuoteRegex.test(code) ||
-          backtickRegex.test(code) ||
-          numericRegex.test(code) ||
-          booleanRegex.test(code)
+          const isSafe = (arithmeticRegex.test(code) && /\d/.test(code)) ||
+            booleanRegex.test(code)
 
-        if (!isSafe) {
-          throw new Error('Unsafe code execution blocked')
+          if (!isSafe) {
+            throw new Error('Unsafe code execution blocked')
+          }
+          username = String(eval(code)) // eslint-disable-line no-eval
+        } catch (err) {
+          username = username.replace(/\\?#{/g, '\\#{').replace(/\\?!{/g, '\\!{')
         }
-        username = eval(code) // eslint-disable-line no-eval
-      } catch (err) {
-        username = '\\' + username
+      } else {
+        username = username.replace(/\\?#{/g, '\\#{').replace(/\\?!{/g, '\\!{')
       }
-    } else {
-      username = '\\' + username
+    }
+
+    if (username) {
+      username = username.replace(/\\?#{/g, '\\#{').replace(/\\?!{/g, '\\!{')
     }
 
     const themeKey = config.get<string>('application.theme') as keyof typeof themes
